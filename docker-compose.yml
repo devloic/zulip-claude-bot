@@ -1,0 +1,10 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - CLAUDE_CWD=/workspace
+    volumes:
+      # Mount a codebase for Claude's file tools (Read, Grep, Glob, Bash)
+      - ${CLAUDE_CWD:-.}:/workspace:ro
