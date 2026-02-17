@@ -6,5 +6,10 @@ services:
     environment:
       - CLAUDE_CWD=/workspace
     volumes:
+      # Persist claude CLI login credentials across restarts
+      - claude-credentials:/root/.claude
       # Mount a codebase for Claude's file tools (Read, Grep, Glob, Bash)
       - ${CLAUDE_CWD:-.}:/workspace:ro
+
+volumes:
+  claude-credentials:
