@@ -23,7 +23,7 @@ export function loadConfig(): Config {
   return {
     zulipUsername: requireEnv("ZULIP_USERNAME"),
     zulipApiKey: requireEnv("ZULIP_API_KEY"),
-    zulipRealm: requireEnv("ZULIP_REALM"),
+    zulipRealm: requireEnv("ZULIP_REALM").replace(/\/+$/, ""),
     contextMessages: parseInt(process.env.CONTEXT_MESSAGES ?? "20", 10),
     claudeMaxTurns: parseInt(process.env.CLAUDE_MAX_TURNS ?? "10", 10),
     claudeCwd: process.env.CLAUDE_CWD ?? process.cwd(),
