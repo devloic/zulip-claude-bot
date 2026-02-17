@@ -35,6 +35,16 @@ export interface ZulipClient {
       content: string;
     }): Promise<{ id: number; result: string; msg: string }>;
   };
+  reactions: {
+    add(params: {
+      message_id: number;
+      emoji_name: string;
+    }): Promise<{ result: string }>;
+    remove(params: {
+      message_id: number;
+      emoji_name: string;
+    }): Promise<{ result: string }>;
+  };
   users: {
     me: {
       getProfile(): Promise<{
@@ -60,6 +70,11 @@ export interface ZulipClient {
       result: string;
     }>;
   };
+  callEndpoint(
+    endpoint: string,
+    method?: string,
+    params?: Record<string, unknown>,
+  ): Promise<{ result: string; msg?: string; [key: string]: unknown }>;
 }
 
 export async function initZulip(
@@ -95,6 +110,118 @@ export async function fetchTopicMessages(
     num_after: 0,
   });
   return response.messages;
+}
+
+export interface StreamingMessage {
+  /** Update with streamed text (flushes every ~40 new words). */
+  update(content: string): void;
+  /** Finalize with the complete answer. Handles long-message splitting. */
+  finalize(content: string): Promise<void>;
+  /** Delete the message (used on error or empty question). */
+  cancel(): Promise<void>;
+}
+
+/**
+ * Post a ":loading: Thinking..." status message that transitions
+ * into a live-streaming response. Shows elapsed seconds until the
+ * first text arrives, then progressively updates with Claude's output.
+ */
+export async function startStreamingMessage(
+  client: ZulipClient,
+  channel: string,
+  topic: string,
+): Promise<StreamingMessage> {
+  const startTime = Date.now();
+  let finalized = false;
+  let textStarted = false;
+
+  const res = await client.messages.send({
+    to: channel,
+    type: "stream",
+    subject: topic,
+    content: ":loading: Thinking...",
+  });
+  const messageId = res.id;
+
+  // Elapsed-seconds timer (runs until first text arrives)
+  const spinnerTimer = setInterval(() => {
+    if (finalized || textStarted) return;
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    client
+      .callEndpoint(`/messages/${messageId}`, "PATCH", {
+        content: `:loading: Thinking... (${elapsed}s)`,
+      })
+      .catch(() => {});
+  }, 2000);
+
+  // Word-count-based updates (flush every ~40 new words)
+  const WORD_FLUSH_THRESHOLD = 40;
+  let lastFlushedWordCount = 0;
+  let latestContent: string | null = null;
+
+  function countWords(text: string): number {
+    return text.split(/\s+/).filter(Boolean).length;
+  }
+
+  function flush() {
+    if (finalized || latestContent === null) return;
+    lastFlushedWordCount = countWords(latestContent);
+    const content = latestContent;
+    latestContent = null;
+    client
+      .callEndpoint(`/messages/${messageId}`, "PATCH", { content })
+      .catch(() => {});
+  }
+
+  function update(content: string) {
+    if (finalized) return;
+    if (!textStarted) {
+      textStarted = true;
+      clearInterval(spinnerTimer);
+    }
+    latestContent = content;
+    if (countWords(content) - lastFlushedWordCount >= WORD_FLUSH_THRESHOLD) {
+      flush();
+    }
+  }
+
+  async function finalize(content: string) {
+    finalized = true;
+    clearInterval(spinnerTimer);
+
+    if (content.length <= MAX_MESSAGE_LENGTH) {
+      // Fits in one message — update the existing one
+      await client
+        .callEndpoint(`/messages/${messageId}`, "PATCH", { content })
+        .catch(() => {});
+    } else {
+      // Split: first chunk replaces the streaming message, rest are new messages
+      const chunks = splitMessage(content, MAX_MESSAGE_LENGTH);
+      await client
+        .callEndpoint(`/messages/${messageId}`, "PATCH", {
+          content: chunks[0],
+        })
+        .catch(() => {});
+      for (let i = 1; i < chunks.length; i++) {
+        await client.messages.send({
+          to: channel,
+          type: "stream",
+          subject: topic,
+          content: chunks[i],
+        });
+      }
+    }
+  }
+
+  async function cancel() {
+    finalized = true;
+    clearInterval(spinnerTimer);
+    await client
+      .callEndpoint(`/messages/${messageId}`, "DELETE")
+      .catch(() => {});
+  }
+
+  return { update, finalize, cancel };
 }
 
 const MAX_MESSAGE_LENGTH = 9500;

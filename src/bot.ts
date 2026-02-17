@@ -1,6 +1,11 @@
+import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import type { Config } from "./config.js";
 import type { ZulipClient, ZulipMessageEvent } from "./zulip.js";
-import { fetchTopicMessages, sendMessage } from "./zulip.js";
+import {
+  fetchTopicMessages,
+  sendMessage,
+  startStreamingMessage,
+} from "./zulip.js";
 import { htmlToText } from "./html-to-text.js";
 import { askClaude } from "./claude.js";
 
@@ -9,6 +14,7 @@ export async function handleMessage(
   botEmail: string,
   event: ZulipMessageEvent,
   config: Config,
+  zulipMcp: McpSdkServerConfigWithInstance,
 ): Promise<void> {
   const msg = event.message;
 
@@ -30,10 +36,16 @@ export async function handleMessage(
   const channel = msg.display_recipient;
   const topic = msg.subject;
 
+  console.log(`Processing message ${msg.id} from ${msg.sender_full_name}`);
+
+  // Post streaming message (shows spinner, then live text, then final answer)
+  const streaming = await startStreamingMessage(client, channel, topic);
+
   try {
     // Extract question from HTML content
     const question = htmlToText(msg.content);
     if (!question.trim()) {
+      await streaming.cancel();
       await sendMessage(
         client,
         channel,
@@ -57,12 +69,21 @@ export async function handleMessage(
       .map((m) => `${m.sender_full_name}: ${htmlToText(m.content)}`)
       .join("\n");
 
-    // Ask Claude
-    const answer = await askClaude(question, context, config);
+    // Ask Claude with streaming
+    console.log("Calling Claude...");
+    const answer = await askClaude(
+      question,
+      context,
+      config,
+      zulipMcp,
+      (text) => streaming.update(text),
+    );
+    console.log(`Claude responded (${answer.length} chars)`);
 
-    // Send response
-    await sendMessage(client, channel, topic, answer);
+    // Finalize with the complete answer
+    await streaming.finalize(answer);
   } catch (err) {
+    await streaming.cancel();
     const errorMsg =
       err instanceof Error ? err.message : "An unknown error occurred";
     console.error(`Error handling message ${msg.id}:`, errorMsg);

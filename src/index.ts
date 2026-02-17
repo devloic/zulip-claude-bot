@@ -3,6 +3,7 @@ import { initZulip } from "./zulip.js";
 import type { ZulipClient, ZulipMessageEvent } from "./zulip.js";
 import { handleMessage } from "./bot.js";
 import type { Config } from "./config.js";
+import { createZulipMcpServer } from "./zulip-tools.js";
 
 const BACKOFF_MS = 5000;
 
@@ -21,6 +22,10 @@ async function eventLoop(
 ): Promise<void> {
   let { queueId, lastEventId } = await registerQueue(client);
 
+  // Create Zulip MCP server (reused across all queries)
+  const zulipMcp = createZulipMcpServer(client);
+  console.log("  Zulip MCP tools: enabled");
+
   while (true) {
     try {
       const response = await client.events.retrieve({
@@ -38,6 +43,7 @@ async function eventLoop(
             botEmail,
             event as ZulipMessageEvent,
             config,
+            zulipMcp,
           ).catch((err) => {
             console.error("Unhandled error in handleMessage:", err);
           });
