@@ -14,7 +14,7 @@ if [ -z "$container" ]; then
 fi
 
 # Check if claude credentials exist inside the container
-if ! docker compose exec bot test -f /root/.claude/.credentials.json; then
+if ! docker compose exec bot test -f /home/bot/.claude/.credentials.json; then
   echo "No claude credentials found. Running claude login..."
   docker compose exec bot claude login
 fi
