@@ -5,11 +5,14 @@ services:
     env_file: .env
     environment:
       - CLAUDE_CWD=/workspace
+      - DB_PATH=/data/tasks.db
     volumes:
-      # Persist claude CLI login credentials across restarts
-      - claude-credentials:/home/bot/.claude
+      # Persist claude CLI login credentials across restarts (local folder)
+      - ./claude-credentials:/home/bot/.claude
       # Mount a codebase for Claude's file tools (Read, Grep, Glob, Bash)
       - ${CLAUDE_CWD:-.}:/workspace:ro
+      # Persist task database
+      - bot-data:/data
 
 volumes:
-  claude-credentials:
+  bot-data:

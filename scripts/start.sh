@@ -2,6 +2,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Ensure local credentials folder exists (bind-mounted into container)
+mkdir -p claude-credentials
+
 echo "Building and starting container..."
 docker compose up --build -d
 
@@ -16,7 +19,7 @@ fi
 # Check if claude credentials exist inside the container
 if ! docker compose exec bot test -f /home/bot/.claude/.credentials.json; then
   echo "No claude credentials found. Running claude login..."
-  docker compose exec bot claude login
+  docker compose exec -it -u bot bot claude login
 fi
 
 echo "Bot is running. Use 'docker compose logs -f bot' to follow output."

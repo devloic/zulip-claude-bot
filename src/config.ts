@@ -8,6 +8,9 @@ export interface Config {
   claudeMaxTurns: number;
   claudeCwd: string;
   claudeModel?: string;
+  tasksChannel: string;
+  taskEmoji: string;
+  dbPath: string;
 }
 
 function requireEnv(name: string): string {
@@ -28,5 +31,8 @@ export function loadConfig(): Config {
     claudeMaxTurns: parseInt(process.env.CLAUDE_MAX_TURNS ?? "10", 10),
     claudeCwd: process.env.CLAUDE_CWD ?? process.cwd(),
     claudeModel: process.env.CLAUDE_MODEL || undefined,
+    tasksChannel: process.env.TASKS_CHANNEL ?? "tasks",
+    taskEmoji: process.env.TASK_EMOJI ?? "clipboard",
+    dbPath: process.env.DB_PATH ?? "/data/tasks.db",
   };
 }

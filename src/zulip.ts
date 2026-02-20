@@ -20,6 +20,17 @@ export interface ZulipMessageEvent {
   flags: string[];
 }
 
+export interface ZulipReactionEvent {
+  type: "reaction";
+  id: number;
+  op: "add" | "remove";
+  user_id: number;
+  message_id: number;
+  emoji_name: string;
+  emoji_code: string;
+  reaction_type: string;
+}
+
 export interface ZulipClient {
   messages: {
     retrieve(params: {
@@ -66,7 +77,11 @@ export interface ZulipClient {
       last_event_id: number;
       dont_block?: boolean;
     }): Promise<{
-      events: Array<ZulipMessageEvent | { type: string; id: number }>;
+      events: Array<
+        | ZulipMessageEvent
+        | ZulipReactionEvent
+        | { type: string; id: number }
+      >;
       result: string;
     }>;
   };
@@ -79,7 +94,7 @@ export interface ZulipClient {
 
 export async function initZulip(
   config: Config,
-): Promise<{ client: ZulipClient; botEmail: string; botName: string }> {
+): Promise<{ client: ZulipClient; botEmail: string; botName: string; botUserId: number }> {
   const client = (await zulipInit({
     username: config.zulipUsername,
     apiKey: config.zulipApiKey,
@@ -91,6 +106,7 @@ export async function initZulip(
     client,
     botEmail: profile.email,
     botName: profile.full_name,
+    botUserId: profile.user_id,
   };
 }
 

@@ -1,34 +1,39 @@
 import { loadConfig } from "./config.js";
+import { initDatabase } from "./db.js";
 import { initZulip } from "./zulip.js";
-import type { ZulipClient, ZulipMessageEvent } from "./zulip.js";
+import type {
+  ZulipClient,
+  ZulipMessageEvent,
+  ZulipReactionEvent,
+} from "./zulip.js";
 import { handleMessage } from "./bot.js";
 import type { Config } from "./config.js";
 import { createZulipMcpServer } from "./zulip-tools.js";
+import { loadServices } from "./services/loader.js";
+import type { Service, ServiceContext } from "./services/types.js";
 
 const BACKOFF_MS = 5000;
 
 async function registerQueue(client: ZulipClient) {
   const result = await client.queues.register({
-    event_types: ["message"],
+    event_types: ["message", "reaction"],
   });
   console.log(`Registered event queue: ${result.queue_id}`);
   return { queueId: result.queue_id, lastEventId: result.last_event_id };
 }
 
 async function eventLoop(
-  client: ZulipClient,
-  botEmail: string,
-  config: Config,
+  services: Service[],
+  ctx: ServiceContext,
 ): Promise<void> {
-  let { queueId, lastEventId } = await registerQueue(client);
+  let { queueId, lastEventId } = await registerQueue(ctx.client);
 
-  // Create Zulip MCP server (reused across all queries)
-  const zulipMcp = createZulipMcpServer(client);
+  const zulipMcp = createZulipMcpServer(ctx.client);
   console.log("  Zulip MCP tools: enabled");
 
   while (true) {
     try {
-      const response = await client.events.retrieve({
+      const response = await ctx.client.events.retrieve({
         queue_id: queueId,
         last_event_id: lastEventId,
       });
@@ -37,26 +42,32 @@ async function eventLoop(
         lastEventId = event.id;
 
         if (event.type === "message") {
-          // Fire-and-forget: handle concurrently, don't block the event loop
           handleMessage(
-            client,
-            botEmail,
             event as ZulipMessageEvent,
-            config,
+            services,
+            ctx,
             zulipMcp,
           ).catch((err) => {
             console.error("Unhandled error in handleMessage:", err);
           });
         }
+
+        if (event.type === "reaction") {
+          const reactionEvent = event as ZulipReactionEvent;
+          for (const svc of services) {
+            if (!svc.onReaction) continue;
+            svc.onReaction(reactionEvent, ctx).catch((err) => {
+              console.error(`[${svc.name}] error in onReaction:`, err);
+            });
+          }
+        }
       }
     } catch (err: unknown) {
-      const errorMsg =
-        err instanceof Error ? err.message : String(err);
+      const errorMsg = err instanceof Error ? err.message : String(err);
 
-      // Re-register queue if it expired
       if (errorMsg.includes("BAD_EVENT_QUEUE_ID")) {
         console.warn("Event queue expired, re-registering...");
-        ({ queueId, lastEventId } = await registerQueue(client));
+        ({ queueId, lastEventId } = await registerQueue(ctx.client));
         continue;
       }
 
@@ -77,10 +88,19 @@ async function main(): Promise<void> {
   console.log(`  Realm: ${config.zulipRealm}`);
   console.log(`  CWD:   ${config.claudeCwd}`);
 
-  const { client, botEmail, botName } = await initZulip(config);
+  const { client, botEmail, botName, botUserId } = await initZulip(config);
   console.log(`  Bot:   ${botName} (${botEmail})`);
 
-  await eventLoop(client, botEmail, config);
+  initDatabase(config.dbPath);
+  console.log(`  DB:    ${config.dbPath}`);
+
+  const ctx: ServiceContext = { client, config, botEmail, botUserId };
+
+  console.log("Loading services...");
+  const services = await loadServices(ctx);
+  console.log(`  ${services.length} service(s) active`);
+
+  await eventLoop(services, ctx);
 }
 
 main().catch((err) => {

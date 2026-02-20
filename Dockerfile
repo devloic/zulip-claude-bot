@@ -2,7 +2,7 @@ FROM node:22-slim
 
 # claude CLI requires git and common shell tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl ca-certificates gosu \
+    git curl ca-certificates gosu python3 make g++ \
   && rm -rf /var/lib/apt/lists/*
 
 # Install claude CLI (needed by @anthropic-ai/claude-agent-sdk)
@@ -13,7 +13,7 @@ RUN useradd -m -s /bin/bash bot
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts
+RUN npm ci
 
 COPY tsconfig.json ./
 COPY src/ src/
